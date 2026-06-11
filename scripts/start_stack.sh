@@ -11,12 +11,21 @@
 #   RESTART_VLLM=1 VLLM_SCRIPT=scripts/configs/01_fp8.sh scripts/start_stack.sh
 #   uv run python load_test/driver.py --rps 10 --duration 300 --out results/run_01.json
 #
+# NOTE: RESTART_VLLM is a 0/1 ON-OFF FLAG, not the run index. It is ONLY ever 0
+# or 1 (the script compares it against "1" exactly; any other value, e.g. 4, is
+# treated as 0 and vLLM is NOT restarted). The run number lives only in
+# VLLM_SCRIPT (.../04_...sh) and the --out filename (run_04.json), which should
+# match each other. So for config 04 you still write RESTART_VLLM=1:
+#   RESTART_VLLM=1 VLLM_SCRIPT=scripts/configs/04_fp8_kvcache_fp8.sh scripts/start_stack.sh
+#   uv run python load_test/driver.py --rps 10 --duration 300 --out results/run_04.json
+#
 # Omit VLLM_SCRIPT to use the baseline (scripts/start_vllm.sh). If you only
 # changed agent code (graph.py), omit RESTART_VLLM=1 too - the agent server is
 # always restarted, vLLM is just health-checked.
 #
 # Env overrides:
-#   RESTART_VLLM   (default 0; set 1 to force a vLLM restart via restart_vllm.sh)
+#   RESTART_VLLM   (default 0; set to 1 to force a vLLM restart via restart_vllm.sh.
+#                   ON-OFF flag only - 0 or 1, never the run number)
 #   VLLM_SCRIPT    (default scripts/start_vllm.sh; passed through to restart_vllm.sh)
 #   AGENT_PORT     (default 8001)
 #   WARMUP         (default 3; number of warmup requests, 0 to skip)

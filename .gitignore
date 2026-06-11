@@ -25,6 +25,7 @@ screenshots/*.jpg
 .DS_Store
 .idea/
 .vscode/
+.claude/
 
 # Lecture material (not part of the student repo)
 *.pdf

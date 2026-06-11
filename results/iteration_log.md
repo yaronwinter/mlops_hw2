@@ -9,7 +9,19 @@ agent run) sustained over a **5-minute** window, on 1× H100 80 GB serving
 RESTART_VLLM=1 VLLM_SCRIPT=scripts/configs/01_fp8.sh scripts/start_stack.sh
 uv run python load_test/driver.py --rps 10 --duration 300 --out results/run_01.json
 ```
-(Run 0 uses the baseline `scripts/start_vllm.sh` — omit `VLLM_SCRIPT`.)
+`RESTART_VLLM` is a **0/1 on-off flag, not the run index** — it's always `1`
+when you want a fresh vLLM (the script compares it against `"1"` exactly; any
+other value is treated as `0` and vLLM is *not* restarted). The run number lives
+only in `VLLM_SCRIPT` and the `--out` filename, which should match each other —
+e.g. for Run 4: `VLLM_SCRIPT=scripts/configs/04_fp8_kvcache_fp8.sh` with
+`--out results/run_04.json`.
+
+(Run 0 uses the baseline `scripts/start_vllm.sh` — omit `VLLM_SCRIPT`:
+```bash
+RESTART_VLLM=1 scripts/start_stack.sh
+uv run python load_test/driver.py --rps 10 --duration 300 --out results/run_00.json
+```
+)
 
 **Config scripts** (the prepared experiment menu)
 
@@ -106,6 +118,22 @@ the *targeted* metric moved — and whether end-to-end P95 (and quality) followe
 | KV cache near 100%, preemptions/swaps | memory-bound | lower `--max-model-len`, or `--kv-cache-dtype fp8` (re-run eval) |
 | vLLM metrics fine, but end-to-end P95 high | agent layer | check `MAX_ITERATIONS`, `max_tokens`, async handler / threadpool |
 | P95 tail driven by occasional long runs | revise loop firing | lower `MAX_ITERATIONS` (re-run eval to confirm quality holds) |
+
+## Setup / plumbing cheat-sheet (things not working *at all*)
+
+Two independent layers: **observability** (`docker compose up -d` → Prometheus/
+Grafana/Langfuse, in containers, CPU-fine) and **serving+agent** (the host scripts
+→ vLLM:8000 + agent:8001, needs the GPU). They talk over `localhost`. vLLM is NOT
+a compose service. `docker-compose.yml` never changes between iterations.
+
+| Symptom | Likely cause | Fix |
+|---------|--------------|-----|
+| Grafana panels empty, **even with vLLM running** | Prometheus container can't reach vLLM on the host | `prometheus.yml` targets `host.docker.internal:8000`; on Linux this needs the `extra_hosts: "host.docker.internal:host-gateway"` mapping (already in compose). Verify: `curl host.docker.internal:8000/metrics` from inside the container (`docker compose exec prometheus wget -qO- host.docker.internal:8000/metrics`), and check Prometheus → Status → Targets shows the `vllm` job UP. |
+| Grafana empty, **no vLLM running** | nothing to scrape | expected — start vLLM (or a tiny CPU `Qwen3-0.6B` vLLM on the host to build panels) |
+| `docker compose up -d` "does nothing" | it only starts the o11y stack, silently | `docker compose ps` should show all services running/healthy; vLLM is separate |
+| Prometheus target DOWN but vLLM up | port/firewall, or vLLM bound to `127.0.0.1` | ensure vLLM listens on `0.0.0.0:8000` (it does in the scripts); open/forward 8000 |
+| Langfuse traces never appear | wrong/stale creds shadowing `.env` | server prints `[langfuse] tracing enabled/WARNING` at startup; `.env` is authoritative (`load_dotenv(override=True)`) so unset any `export LANGFUSE_*`; confirm with `Langfuse().auth_check()` |
+| Agent 500s on every `/answer` | model id mismatch or backend unreachable | `curl $VLLM_BASE_URL/models` must list `VLLM_MODEL`; check the agent terminal traceback |
 
 ## Final verdict
 
