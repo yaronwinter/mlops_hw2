@@ -28,7 +28,9 @@ def _q(ident: str) -> str:
 def render_schema(db_id: str) -> str:
     path = db_path(db_id)
     if not path.exists():
-        raise FileNotFoundError(f"DB {db_id} not found at {path}. Did you run scripts/load_data.py?")
+        raise FileNotFoundError(
+            f"DB {db_id} not found at {path}. Did you run scripts/load_data.py?"
+        )
 
     parts: list[str] = [f"-- Database: {db_id}"]
     with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as conn:
@@ -43,7 +45,9 @@ def render_schema(db_id: str) -> str:
         for t in tables:
             parts.append(f"\nCREATE TABLE {_q(t)} (")
             col_lines: list[str] = []
-            for _cid, name, ctype, notnull, _dflt, pk in conn.execute(f"PRAGMA table_info({_q(t)})"):
+            for _cid, name, ctype, notnull, _dflt, pk in conn.execute(
+                f"PRAGMA table_info({_q(t)})"
+            ):
                 line = f"  {_q(name)} {ctype}"
                 if pk:
                     line += " PRIMARY KEY"

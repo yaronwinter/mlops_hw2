@@ -74,11 +74,16 @@ def build_eval_files() -> None:
     EVAL_FILE.parent.mkdir(parents=True, exist_ok=True)
     with EVAL_FILE.open("w") as f:
         for r in eval_rows:
-            f.write(json.dumps({
-                "question": r["question"],
-                "db_id": r["db_id"],
-                "gold_sql": r["SQL"],
-            }) + "\n")
+            f.write(
+                json.dumps(
+                    {
+                        "question": r["question"],
+                        "db_id": r["db_id"],
+                        "gold_sql": r["SQL"],
+                    }
+                )
+                + "\n"
+            )
     print(f"Wrote {len(eval_rows)} eval questions to {EVAL_FILE}")
 
     # No cycling - we use only unique rows. If the BIRD dev pool is smaller
@@ -87,10 +92,15 @@ def build_eval_files() -> None:
     perf_rows = perf_source[:N_PERF]
     with PERF_FILE.open("w") as f:
         for r in perf_rows:
-            f.write(json.dumps({
-                "question": r["question"],
-                "db_id": r["db_id"],
-            }) + "\n")
+            f.write(
+                json.dumps(
+                    {
+                        "question": r["question"],
+                        "db_id": r["db_id"],
+                    }
+                )
+                + "\n"
+            )
     print(f"Wrote {len(perf_rows)} perf questions to {PERF_FILE}")
 
 
@@ -108,7 +118,9 @@ def consolidate_sqlite() -> None:
     available = sorted(p.stem for p in DATA_DIR.glob("*.sqlite"))
     print(f"Sqlite DBs available: {available}")
     if not available:
-        sys.exit("No sqlite DBs found - the inner dev_databases.zip may not have extracted correctly.")
+        sys.exit(
+            "No sqlite DBs found - the inner dev_databases.zip may not have extracted correctly."
+        )
 
 
 if __name__ == "__main__":

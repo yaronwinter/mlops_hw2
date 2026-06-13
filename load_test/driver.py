@@ -38,7 +38,9 @@ async def fire_one(
     status = "ok"
     err: str | None = None
     try:
-        async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=120)) as resp:
+        async with session.post(
+            url, json=payload, timeout=aiohttp.ClientTimeout(total=120)
+        ) as resp:
             await resp.read()
             if resp.status != 200:
                 status = "http_error"
@@ -48,17 +50,21 @@ async def fire_one(
     except Exception as e:  # noqa: BLE001
         status = "client_error"
         err = f"{type(e).__name__}: {e}"
-    results.append({
-        "latency_seconds": time.monotonic() - t0,
-        "status": status,
-        "error": err,
-    })
+    results.append(
+        {
+            "latency_seconds": time.monotonic() - t0,
+            "status": status,
+            "error": err,
+        }
+    )
 
 
 async def drive(args: argparse.Namespace) -> None:
     if not PERF_POOL.exists():
         raise SystemExit(f"{PERF_POOL} not found - run scripts/load_data.py first")
-    questions = [json.loads(line) for line in PERF_POOL.read_text().splitlines() if line.strip()]
+    questions = [
+        json.loads(line) for line in PERF_POOL.read_text().splitlines() if line.strip()
+    ]
     if not questions:
         raise SystemExit(f"{PERF_POOL} is empty")
 
@@ -74,7 +80,9 @@ async def drive(args: argparse.Namespace) -> None:
         next_fire = start
         while time.monotonic() < deadline:
             q = rnd.choice(questions)
-            tasks.append(asyncio.create_task(fire_one(session, args.agent_url, q, results)))
+            tasks.append(
+                asyncio.create_task(fire_one(session, args.agent_url, q, results))
+            )
             next_fire += interval
             sleep_for = next_fire - time.monotonic()
             if sleep_for > 0:

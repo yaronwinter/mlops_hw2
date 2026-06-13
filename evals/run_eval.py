@@ -35,14 +35,15 @@ QUESTION = "question"
 DB_ID = "db_id"
 GOLD_SQL = "gold_sql"
 TAGS = "tags"
-GOLD_EXEC_OK = "gold_exec_ok"
-GOLD_ERROR = "gold_error"
-FINAL_SQL = "final_sql"
-CORRECT = "correct"
-AGENT_ERROR = "agent_error"
+FOUND = "found"
+END2END = "end2end"
 LATENCY_SECONDS = "latency_seconds"
+ISSUE = "issue"
 
-def run_sql(db_id: str, sql: str, timeout: float = 5.0) -> tuple[bool, list[tuple] | None, str | None]:
+
+def run_sql(
+    db_id: str, sql: str, timeout: float = 5.0
+) -> tuple[bool, list[tuple] | None, str | None]:
     """Run sql against db_id in read-only mode. Returns (ok, rows, error)."""
     path = DB_DIR / f"{db_id}.sqlite"
     try:
@@ -78,9 +79,8 @@ def eval_one(question: dict, agent_url: str) -> dict:
     # row is visible rather than silently dragging the pass rate down.
     gold_ok, gold_rows, gold_err = run_sql(db_id, gold_sql)
 
-    final_sql = ""
-    history: list[dict] = []
-    agent_error: str | None = None
+    proposals: list[dict] = []
+    verifications: list[dict] = []
     t0 = time.monotonic()
     num_iterations = 0
     try:
@@ -91,45 +91,74 @@ def eval_one(question: dict, agent_url: str) -> dict:
         )
         resp.raise_for_status()
         data = resp.json()
-        final_sql = data.get(SQL, "")
         num_iterations = data.get(ITERATIONS, 0)
-        history = [node for node in data.get(HISTORY, []) if node.get(NODE) in ("generate_sql", "revise")]
-        assert num_iterations == len(history), f"agent said {num_iterations} iterations but returned {len(history)} history entries: {json.dumps(data, indent=2)}"
+        proposals = [
+            node
+            for node in data.get(HISTORY, [])
+            if node.get(NODE) in ("generate_sql", "revise")
+        ]
+        verifications = [
+            node for node in data.get(HISTORY, []) if node.get(NODE) == "verify"
+        ]
+        assert (
+            num_iterations == len(proposals)
+        ), f"agent said {num_iterations} iterations but returned {len(proposals)} proposals entries: {json.dumps(data, indent=2)}"
+        assert (
+            num_iterations == len(verifications)
+        ), f"agent said {num_iterations} iterations but returned {len(verifications)} verifications entries: {json.dumps(data, indent=2)}"
     except Exception as e:  # noqa: BLE001
         raise ValueError(f"{type(e).__name__}: {e}")
     latency = time.monotonic() - t0
 
-    pred_ok, pred_rows, pred_err = run_sql(db_id, final_sql)
-    is_correct = matches(gold_rows, pred_rows)
+    found_at_iter = [False] * (MAX_ITERATIONS + 1)
+    e2e_at_iter = [False] * (MAX_ITERATIONS + 1)
+    is_correct = False
+    i = 0
+    while (i < num_iterations) and not is_correct:
+        sql = proposals[i].get(SQL)
+        issue = verifications[i].get(ISSUE)
+
+        _, pred_rows, _ = run_sql(db_id, sql)
+        is_correct = matches(gold_rows, pred_rows)
+        is_verified = len(issue) == 0
+
+        for k in range(i + 1, MAX_ITERATIONS + 1):
+            found_at_iter[
+                k
+            ] = is_correct  # SQL is correct at iteration i, so it's also correct at every later iteration
+            e2e_at_iter[k] = (
+                is_verified and is_correct
+            )  # end-to-end success at iteration i, so also at every later iteration
+        i += 1
+
     return {
         QUESTION: q_text,
         DB_ID: db_id,
-        GOLD_SQL: gold_sql,
-        GOLD_EXEC_OK: gold_ok,
-        GOLD_ERROR: gold_err,
-        FINAL_SQL: final_sql,
         ITERATIONS: num_iterations,
-        CORRECT: is_correct,
-        AGENT_ERROR: agent_error,
+        FOUND: found_at_iter,
+        END2END: e2e_at_iter,
         LATENCY_SECONDS: round(latency, 3),
     }
 
 
-def summarize(results: list[dict]) -> dict:
+def summarize(results: list[dict]) -> tuple:
     """Aggregate per-question results."""
     # pass[k] = how many questions are correct if we stop after iteration k,
     # carrying a terminated question's last candidate forward to every later k.
-    pass_at_iter = [0] * (MAX_ITERATIONS + 1)
+    found_at_iter = [0] * (MAX_ITERATIONS + 1)
+    e2e_at_iter = [0] * (MAX_ITERATIONS + 1)
     iter_distribution = [0] * (MAX_ITERATIONS + 1)
     for r in results:
-        iter_distribution[r[ITERATIONS]] += 1            
-        if not r[CORRECT]:
-            continue  # wrong at every k
+        iter_distribution[r[ITERATIONS]] += 1
+        for k in range(1, (MAX_ITERATIONS + 1)):
+            try:
+                found_at_iter[k] += int(r[FOUND][k])
+                e2e_at_iter[k] += int(r[END2END][k])
+            except Exception as e:
+                raise ValueError(f"found: {r[FOUND]}, end2end: {r[END2END]}, e: {e}")
 
-        for k in range(r[ITERATIONS], (MAX_ITERATIONS + 1)):
-            pass_at_iter[k] += 1
+    return found_at_iter, e2e_at_iter, iter_distribution
 
-    return pass_at_iter, iter_distribution
 
 def main() -> None:
     parser = argparse.ArgumentParser()
@@ -138,24 +167,46 @@ def main() -> None:
     parser.add_argument("--agent-url", default=AGENT_URL_DEFAULT)
     args = parser.parse_args()
 
-    questions = [json.loads(line) for line in args.eval_set.read_text().splitlines() if line.strip()]
+    questions = [
+        json.loads(line)
+        for line in args.eval_set.read_text().splitlines()
+        if line.strip()
+    ]
     print(f"Loaded {len(questions)} eval questions from {args.eval_set}")
 
     results: list[dict] = []
     t0 = time.monotonic()
     for i, q in enumerate(questions, 1):
-        print(f"[{i}/{len(questions)}] {q['db_id']}: {q['question'][:60]}...", flush=True)
-        results.append(eval_one(q, args.agent_url))
+        eval_res = eval_one(q, args.agent_url)
+        print(
+            f"[{i}/{len(questions)}] {q['db_id']}: {q['question'][:60]}..., found: {eval_res[FOUND][-1]}, end-to-end: {eval_res[END2END][-1]}, latency: {eval_res[LATENCY_SECONDS]}",
+            flush=True,
+        )
+        results.append(eval_res)
     elapsed = time.monotonic() - t0
 
-    assert len(results) == len(questions), f"got {len(results)} results but expected {len(questions)}"
-    pass_at_iter, iter_distribution = summarize(results)
+    assert len(results) == len(
+        questions
+    ), f"got {len(results)} results but expected {len(questions)}"
+    found_at_iter, e2e_at_iter, iter_distribution = summarize(results)
+
     out = {
         "num_questions": len(questions),
-        "accuracy": pass_at_iter[-1] / len(questions),
-        "pass_at_iter": {i: pass_at_iter[i] for i in range(1, len(pass_at_iter))},
-        "accuracy_at_iter": {i: pass_at_iter[i] / len(questions) for i in range(1, len(pass_at_iter))},
-        "iter_distribution": {i: iter_distribution[i] for i in range(1, len(iter_distribution))},
+        "found accuracy": found_at_iter[-1] / len(questions),
+        "end-to-end accuracy": e2e_at_iter[-1] / len(questions),
+        "found_at_iter": {i: found_at_iter[i] for i in range(1, (MAX_ITERATIONS + 1))},
+        "found_at_iter_percent": {
+            i: f"{found_at_iter[i] / len(questions) * 100:.3f}"
+            for i in range(1, (MAX_ITERATIONS + 1))
+        },
+        "end2end_at_iter": {i: e2e_at_iter[i] for i in range(1, (MAX_ITERATIONS + 1))},
+        "end2end_at_iter_percent": {
+            i: f"{e2e_at_iter[i] / len(questions) * 100:.3f}"
+            for i in range(1, (MAX_ITERATIONS + 1))
+        },
+        "iter_distribution": {
+            i: iter_distribution[i] for i in range(1, (MAX_ITERATIONS + 1))
+        },
         "mean_latency_seconds": elapsed / len(questions),
     }
     args.out.parent.mkdir(parents=True, exist_ok=True)

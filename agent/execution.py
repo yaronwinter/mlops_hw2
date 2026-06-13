@@ -30,8 +30,14 @@ class ExecutionResult:
         preview = "\n".join(
             " | ".join(str(c) for c in row) for row in (self.rows or [])[:max_rows]
         )
-        more = f"\n... ({self.row_count - max_rows} more rows)" if self.row_count > max_rows else ""
-        return f"OK: {self.row_count} rows.\nCOLUMNS: {cols}\nFIRST ROWS:\n{preview}{more}"
+        more = (
+            f"\n... ({self.row_count - max_rows} more rows)"
+            if self.row_count > max_rows
+            else ""
+        )
+        return (
+            f"OK: {self.row_count} rows.\nCOLUMNS: {cols}\nFIRST ROWS:\n{preview}{more}"
+        )
 
 
 def execute_sql(db_id: str, sql: str, timeout_seconds: float = 5.0) -> ExecutionResult:
@@ -46,6 +52,8 @@ def execute_sql(db_id: str, sql: str, timeout_seconds: float = 5.0) -> Execution
             cur = conn.execute(sql)
             cols = [d[0] for d in cur.description] if cur.description else []
             rows = cur.fetchall()
-            return ExecutionResult(ok=True, rows=rows, columns=cols, row_count=len(rows))
+            return ExecutionResult(
+                ok=True, rows=rows, columns=cols, row_count=len(rows)
+            )
     except Exception as e:  # noqa: BLE001
         return ExecutionResult(ok=False, error=f"{type(e).__name__}: {e}")

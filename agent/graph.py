@@ -54,7 +54,7 @@ class AgentState:
 
 
 def llm(max_tokens: int = 512, guided_json: dict | None = None) -> ChatOpenAI:
-    """ Helper to configure the LLM calls in generate/verify/revise nodes.
+    """Helper to configure the LLM calls in generate/verify/revise nodes.
     * max_tokens bounds decode latency deterministically. Use a small cap for
       short replies (verify's tiny JSON) and a larger one for SQL generation.
     * guided_json, when set, asks vLLM's guided-decoding backend to constrain
@@ -82,6 +82,7 @@ VERIFY_SCHEMA = {
     },
     "required": ["ok", "issue"],
 }
+
 
 def _attach_schema(state: AgentState) -> dict:
     """Provided. Render the DB schema once at the start of the run."""
@@ -124,13 +125,18 @@ async def generate_sql_node(state: AgentState) -> dict:
     """
     # max_tokens caps decode time: a SQL statement is short, so 256 is ample
     # headroom while bounding the worst-case latency of this call.
-    response = await llm(max_tokens=256).ainvoke([
-        ("system", prompts.GENERATE_SQL_SYSTEM),
-        ("user", prompts.GENERATE_SQL_USER.format(
-            schema=state.schema,
-            question=state.question,
-        )),
-    ])
+    response = await llm(max_tokens=256).ainvoke(
+        [
+            ("system", prompts.GENERATE_SQL_SYSTEM),
+            (
+                "user",
+                prompts.GENERATE_SQL_USER.format(
+                    schema=state.schema,
+                    question=state.question,
+                ),
+            ),
+        ]
+    )
     sql = _extract_sql(response.content)
     return {
         "sql": sql,
@@ -172,18 +178,24 @@ async def verify_node(state: AgentState) -> dict:
         return {
             "verify_ok": False,
             "verify_issue": issue,
-            "history": state.history + [{"node": "verify", "ok": False, "issue": issue}],
+            "history": state.history
+            + [{"node": "verify", "ok": False, "issue": issue}],
         }
 
     # The query ran - ask the model whether the rows plausibly answer the question.
-    response = await llm(max_tokens=128, guided_json=VERIFY_SCHEMA).ainvoke([
-        ("system", prompts.VERIFY_SYSTEM),
-        ("user", prompts.VERIFY_USER.format(
-            question=state.question,
-            sql=state.sql,
-            result=execution.render(),
-        )),
-    ])
+    response = await llm(max_tokens=128, guided_json=VERIFY_SCHEMA).ainvoke(
+        [
+            ("system", prompts.VERIFY_SYSTEM),
+            (
+                "user",
+                prompts.VERIFY_USER.format(
+                    question=state.question,
+                    sql=state.sql,
+                    result=execution.render(),
+                ),
+            ),
+        ]
+    )
     try:
         data = _parse_verdict(response.content)
         ok = bool(data.get("ok", True))
@@ -213,23 +225,27 @@ async def revise_node(state: AgentState) -> dict:
     execution = state.execution
     result_view = execution.render() if execution is not None else "no execution result"
 
-    response = await llm(max_tokens=256).ainvoke([
-        ("system", prompts.REVISE_SYSTEM),
-        ("user", prompts.REVISE_USER.format(
-            schema=state.schema,
-            question=state.question,
-            sql=state.sql,
-            result=result_view,
-            issue=state.verify_issue,
-        )),
-    ])
+    response = await llm(max_tokens=256).ainvoke(
+        [
+            ("system", prompts.REVISE_SYSTEM),
+            (
+                "user",
+                prompts.REVISE_USER.format(
+                    schema=state.schema,
+                    question=state.question,
+                    sql=state.sql,
+                    result=result_view,
+                    issue=state.verify_issue,
+                ),
+            ),
+        ]
+    )
     sql = _extract_sql(response.content)
     return {
         "sql": sql,
         "iteration": state.iteration + 1,
-        "history": state.history + [
-            {"node": "revise", "sql": sql, "issue": state.verify_issue}
-        ],
+        "history": state.history
+        + [{"node": "revise", "sql": sql, "issue": state.verify_issue}],
     }
 
 
@@ -245,6 +261,7 @@ def route_after_verify(state: AgentState) -> str:
 
 
 # ---- Graph wiring -----------------------------------------------------
+
 
 def build_graph():
     g = StateGraph(AgentState)

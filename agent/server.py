@@ -141,11 +141,13 @@ async def _run_traced(req: AnswerRequest, state: AgentState) -> dict:
             final = await graph.ainvoke(state, config={"callbacks": [_lf_handler]})
 
         execution = final.get("execution")
-        root_span.update(output={
-            "sql": final.get("sql", ""),
-            "ok": bool(execution and execution.ok),
-            "iterations": final.get("iteration", 0),
-            "rows": (execution.row_count if execution and execution.ok else None),
-            "error": (execution.error if execution and not execution.ok else None),
-        })
+        root_span.update(
+            output={
+                "sql": final.get("sql", ""),
+                "ok": bool(execution and execution.ok),
+                "iterations": final.get("iteration", 0),
+                "rows": (execution.row_count if execution and execution.ok else None),
+                "error": (execution.error if execution and not execution.ok else None),
+            }
+        )
         return final
