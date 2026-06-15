@@ -29,10 +29,17 @@ rows should exist; the wrong columns were selected; an aggregate was returned wh
 list was asked for (or vice versa); or the values clearly don't match what was asked. \
 Put a one-line, actionable reason in issue so the query can be fixed.
 
-Judge plausibility from the question and the result only. Do not rewrite the SQL."""
+Use the schema (including its example column values) to judge whether the query \
+targeted the right tables and columns. When the result is empty because the value \
+the question asks about actually lives in a different table or column, say so \
+concretely in issue - name the table/column and any join needed (e.g. via a foreign \
+key) - so the fix is obvious. Do not rewrite the SQL yourself."""
 
-# Available placeholders: {question}, {sql}, {result}
-VERIFY_USER = """Question: {question}
+# Available placeholders: {schema}, {question}, {sql}, {result}
+VERIFY_USER = """Database schema:
+{schema}
+
+Question: {question}
 
 SQL:
 {sql}

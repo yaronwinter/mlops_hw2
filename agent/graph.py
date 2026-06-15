@@ -189,6 +189,7 @@ async def verify_node(state: AgentState) -> dict:
             (
                 "user",
                 prompts.VERIFY_USER.format(
+                    schema=state.schema,
                     question=state.question,
                     sql=state.sql,
                     result=execution.render(),
