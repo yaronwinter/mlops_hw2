@@ -1,0 +1,40 @@
+Request Format (when all is up):
+
+curl -s -w '\n[http %{http_code}  %{time_total}s]\n' http://localhost:8001/answer \
+  -H 'Content-Type: application/json' \
+  -d '{"question":"What are the coordinates of the Australian GP circuit?","db":"formula_1"}'
+
+
+#############
+It's easy to end up here: the earlier permission denied means you have docker runs both with and without sudo, and bringing the stack up more than once can leave orphan containers and dangling networks behind.
+
+So stop chasing it â�� reset the Docker stack cleanly. This is safe: vLLM and the agent run on the host (not in compose), and Langfuse is on Cloud â�� none of them are touched. Only the monitoring containers get rebuilt.
+
+On the VM:
+
+cd ~/mlops_hw2
+
+# 1. See the pollution â�� look for duplicate prometheus/grafana containers
+sudo docker ps -a
+
+# 2. Tear the whole compose stack down, including orphans
+sudo docker compose down --remove-orphans
+
+# 3. Confirm nothing's left behind (should print nothing)
+sudo docker ps -a | grep -E 'prometheus|grafana'
+
+# 4. Bring up a single clean pair (Langfuse is on Cloud, so skip those services)
+sudo docker compose up -d prometheus grafana
+
+# 5. Check
+sudo docker compose ps
+
+Then refresh http://localhost:9090/targets. With exactly one Prometheus on one network, scraping host.docker.internal:8000, the vllm target should come up green â�� because we already proved that path works.
+
+A couple of notes:
+- Always use sudo for docker here, consistently â�� mixing sudo/non-sudo is part of what created the mess (they can even be different Docker contexts).
+- If step 1 shows multiple prometheus containers or step 3 still lists something, tell me â�� but down --remove-orphans should clear it.
+- Optional, if you want a truly fresh start (also wipes Prometheus's stored data, which is fine for this assignment): add -v â�� sudo docker compose down --remove-orphans -v.
+
+Want me to also fold the monitoring bring-up into a small scripts/start_monitoring.sh (with the right sudo + service names) so you don't have to reconstruct these commands each slot? And separately â�� your actual code fixes from this session are still uncommitted; want me to commit them on slot_time once the stack is green?
+###################
